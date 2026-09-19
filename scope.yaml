@@ -1,0 +1,22 @@
+# Authorization record. Hackbox refuses to run against a target with no entry here.
+# The demo target is a sandbox we own end to end, so authorization is trivially ours.
+runs:
+  - id: demo-self-owned
+    target: hackbox-victim
+    description: Demo victim app running inside a Daytona sandbox that we created.
+    requester: hackbox operator (owner of the target)
+    authorized: true
+    window:
+      start: "2026-09-19T14:00:00+09:00"
+      end: "2026-09-19T18:00:00+09:00"
+    allowed_tests:
+      - vulnerability_scan
+      - load_test
+    limits:
+      max_concurrency: 40
+      max_duration_seconds: 90
+      max_requests_per_second: 400
+    stop_conditions:
+      max_error_rate: 0.15
+      max_p95_ms: 2000
+    emergency_contact: on-site operator

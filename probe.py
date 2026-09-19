@@ -45,6 +45,14 @@ def finding(title, owasp, severity, cvss, endpoint, evidence, repro):
 
 results = []
 
+# --- reachability gate ------------------------------------------------------------
+# Without this an unreachable target produces a false "missing security headers" finding,
+# because every header is absent when no response ever arrives.
+status, _, body = fetch("/health")
+if status != 200:
+    print(f"SCAN_ERROR target unreachable at {TARGET}: status={status} body={body[:160]}")
+    raise SystemExit(3)
+
 # --- A03 Injection: reflected XSS -------------------------------------------------
 payload = "<script>alert(1)</script>"
 status, headers, body = fetch("/search?q=" + urllib.parse.quote(payload))
