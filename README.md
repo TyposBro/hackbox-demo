@@ -1,90 +1,106 @@
-# Hackbox — demo slice
+# Hackbox
 
-A cut-down, runnable slice of [Hackbox](../hackbox): an internal security testing platform that runs
-vulnerability scanning inside isolated [Daytona](https://www.daytona.io) sandboxes.
+Security testing that does not require trusting the tool with your laptop or your uptime.
 
-The full spec has seven phases. This is the part that runs, built and verified during the
-HackSprint Seoul hackathon on 2026-09-19.
+Built at Daytona HackSprint Seoul, 2026-09-19.
 
-## What works, verified live
+## What it does
 
-| Piece | Status |
+One command runs a vulnerability scan and a load test against a target you own:
+
+```bash
+python orchestrator.py
+```
+
+Four phases, each on a fresh Daytona sandbox:
+
+1. The target application starts inside a sandbox.
+2. A second sandbox scans it and reports findings with OWASP categories and CVSS scores.
+3. A third sandbox generates load until the target degrades.
+4. The report is rendered and published from a sandbox, and every step is written to a
+   hash-chained audit log.
+
+Then all of it is destroyed.
+
+## Verified live
+
+| Result | Value |
 |---|---|
-| Victim app running inside a Daytona sandbox | Verified, HTTP 200 on `/health` |
-| Public target URL via `create_signed_preview_url()` | Verified, opens in any browser with no headers |
-| Probe scanner running inside a second sandbox | Verified, 0.7s, stdlib only, zero install |
-| Nuclei install inside a sandbox | Verified, 4.1s |
-| Sandbox teardown via TTL | Verified |
+| Findings | 4, in under 1 second of scan time |
+| Load ramp | 900 to 4,000 requests per second |
+| Kill switch | Tripped automatically at the 15 percent error threshold |
+| Sandbox create | About 2.6 seconds median |
+| Sandboxes after the run | 0 |
 
-## The design decision that made this possible
+## The design decision that matters most
 
-The full spec's Phase 1 builds a tunnel manager, because Nosana workers and Daytona sandboxes cannot
-reach `localhost`.
+The scanner and the load generators are **linked child sandboxes** on the same internal network as
+the target:
 
-This slice removes that entirely. The victim app runs inside a Daytona sandbox and is exposed with
-`create_signed_preview_url(port, expires_in_seconds=...)`. That URL is reachable from the public
-internet with no auth headers, so both the scanner sandbox and any remote worker can hit it.
+```python
+victim  = daytona.create()                              # the target
+scanner = daytona.create(CreateSandboxFromSnapshotParams(
+    linked_sandbox=victim.id, ephemeral=True, auto_delete_interval=0))
+```
 
-One less component, and the demo target is a machine we own end to end.
+Linked sandboxes share a link network and are addressable by DNS alias, so the scanner reaches the
+target at `http://<victim.name>:3000`.
 
-Note: `get_preview_link()` returns a token that must be sent as an `x-daytona-preview-token`
-header, so its bare URL returns 401 in a browser. The signed form bakes the token into the
-hostname. Use the signed form.
+This means **the target is never exposed to the public internet**. An earlier version published the
+target through a public preview URL; it worked from a browser but was unreachable from inside
+another sandbox, which silently broke the scan and the load test. Moving to linked sandboxes fixed
+both and removed the public exposure entirely.
 
-## Why a stdlib probe scanner instead of ZAP
+## Safeguards
 
-Measured inside a real Daytona sandbox:
+| Safeguard | How it works |
+|---|---|
+| Authorization | `scope.yaml` holds target, requester, window, allowed test types and limits. No record, no run. |
+| Traffic ceiling | Concurrency, duration and request rate come from the scope file, not the command line. |
+| Kill switch | The orchestrator polls live error rate and p95, and aborts when either crosses the agreed stop condition. |
+| Audit log | Append-only, each entry hashes the previous one, so a run cannot be edited afterwards. |
+| Isolation | A fresh sandbox per phase, destroyed in a `finally` block. Nothing is reused. |
+| No public exposure | The target is reachable only over the internal link network. |
 
-- No Docker, so the ZAP container image is not usable.
-- No Java, so a native ZAP install needs a JVM first.
-- Nuclei installs in 4.1s and runs, but its template matching did not fire reliably against a
-  dynamically generated target within the time budget.
+## Findings it detects
 
-So the scanner is `probe.py`: Python stdlib, zero install, deterministic checks, 0.7s per run.
-It covers reflected XSS, unparameterised SQL, missing security headers, version disclosure, and
-missing rate limiting, each mapped to an OWASP category and a CVSS score.
+All mapped to OWASP categories and CVSS scores:
 
-Correctness beats brand here. The finding schema and CVSS mapping are what the report consumes.
+- Reflected cross-site scripting (A03, CVSS 7.4)
+- SQL query built by string concatenation (A03, CVSS 8.1)
+- Missing HTTP security headers (A05, CVSS 5.3)
+- No rate limiting on a request path (A04, CVSS 5.9)
+- Server version disclosure (A09, CVSS 3.1)
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `victim.js` | The target. Node stdlib, starts instantly. Contains three planted bugs. |
-| `probe.py` | The scanner. Runs inside a sandbox. Emits one JSON finding per line. |
-| `demo.py` | Creates both sandboxes, launches the victim, prints the public URL, runs the scan. |
-| `xss-template.yaml` | Nuclei template, kept for the full-scan path. |
+| `orchestrator.py` | The pipeline: scope validation, four phases, kill switch, audit, report |
+| `probe.py` | The scanner. Runs inside a sandbox. Python stdlib, zero install |
+| `loadgen.js` | The load generator. Runs inside a sandbox. Node stdlib |
+| `victim.js` | Demo target with planted bugs and a soft capacity ceiling |
+| `scope.yaml` | The authorization record |
+| `PITCH.md` | The three-minute stage script |
 
-## Run it
+## Why the scanner is not ZAP
+
+Measured inside a real Daytona sandbox: no Docker (so the ZAP image is unusable) and no Java (so a
+native install needs a JVM first). Nuclei installs in 4.1 seconds, but its template matching did
+not fire reliably against a dynamically generated target.
+
+So the scanner is a stdlib probe suite: deterministic, zero install, 0.4 seconds per run. The
+finding schema and the CVSS mapping are what the report consumes, and a heavier scanner is a
+configuration change.
+
+## Not built yet
+
+The Nosana distributed-worker path for the load test is specified but not wired up. The current
+load generator runs in a single linked sandbox.
+
+## Running it
 
 ```bash
-python demo.py
+# .env needs DAYTONA_API_KEY. The rest has defaults.
+python orchestrator.py
 ```
-
-Uses 2 of the 10 vCPUs the hackathon tier allows. Both sandboxes carry a TTL and clean themselves
-up. Verified numbers from this tier: `create()` median 2.6s, a scan cell costs about 3.6s
-end to end.
-
-## Daytona integration, for the code-level review
-
-| Call | Where | What it does |
-|---|---|---|
-| `Daytona(DaytonaConfig(...))` | `demo.py` | Client construction from env config |
-| `daytona.create()` | `demo.py` | A fresh isolated machine per role, never reused |
-| `sandbox.process.code_run()` | `demo.py` | Writes files into the sandbox without quoting hazards |
-| `sandbox.process.exec()` | `demo.py` | Launches the target, runs the scanner |
-| `sandbox.create_signed_preview_url(3000, ...)` | `demo.py` | Public, browser-openable URL for the target |
-| `sandbox.set_ttl()` | `demo.py` | Guarantees teardown even if the orchestrator dies |
-
-## Operational notes from this tier
-
-- Total CPU limit is 10 vCPU and `daytona-small` is 1 vCPU, so 10 concurrent sandboxes is the cap.
-  Exceeding it fails `create()` with HTTP 400.
-- `delete()` is fire-and-forget and does not release the vCPU. Orphaned sandboxes accumulate until
-  every later `create()` fails. Always pass `wait=True`.
-- `asyncio.gather` without `return_exceptions=True` aborts on the first bad cell and orphans its
-  siblings. That exhausted the quota once.
-
-## Next
-
-Nosana's load-testing phase, and the reporting and audit log from the full spec.
