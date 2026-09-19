@@ -1,4 +1,6 @@
 .env
 __pycache__/
 findings.json
+report.html
+audit.jsonl
 *.log

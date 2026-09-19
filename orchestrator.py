@@ -241,7 +241,7 @@ def main() -> int:
         push(loader, HERE / "loadgen.js", "/home/daytona/loadgen.js")
         loader.process.exec(
             f"cd /home/daytona && nohup node loadgen.js {internal_url} "
-            f"{limits['max_concurrency']} 15 {limits['max_duration_seconds']} "
+            f"{limits['max_concurrency']} 20 {limits['max_duration_seconds']} 5 "
             ">/tmp/load.log 2>&1 &")
         time.sleep(2)
 

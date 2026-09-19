@@ -10,7 +10,7 @@ const PORT = Number(process.env.PORT || 3000);
 // Deliberately fixed capacity, standing in for an app with no autoscaling and no queue.
 // Above this request rate it sheds load with 503. This is what gives the orchestrator's
 // kill switch something real to detect, instead of a target that absorbs infinite traffic.
-const MAX_RPS = Number(process.env.MAX_RPS || 6000);
+const MAX_RPS = Number(process.env.MAX_RPS || 4000);
 const recent = [];
 let served = 0;
 let inFlight = 0;

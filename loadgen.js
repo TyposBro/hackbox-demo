@@ -2,13 +2,16 @@
 // Node stdlib only. Ramps concurrency, exposes live stats on :3001, and stops on command so the
 // orchestrator's kill switch has something real to pull.
 //
-//   node loadgen.js <target-url> <max-concurrency> <ramp-seconds> <max-duration-seconds>
+//   node loadgen.js <target-url> <max-concurrency> <ramp-seconds> <max-duration-seconds> <delay-ms>
+// delay-ms paces each worker so the offered rate climbs smoothly instead of saturating
+// the target in the first second, which is what makes the degradation visible.
 const http = require('http');
 
 const TARGET = (process.argv[2] || '').replace(/\/$/, '');
 const MAX_CONCURRENCY = Number(process.argv[3] || 20);
 const RAMP_SECONDS = Number(process.argv[4] || 8);
 const MAX_DURATION = Number(process.argv[5] || 90);
+const DELAY_MS = Number(process.argv[6] || 5);
 const STATS_PORT = 3001;
 
 if (!TARGET) {
@@ -110,7 +113,10 @@ const ramp = setInterval(() => {
   if (concurrency >= MAX_CONCURRENCY) return clearInterval(ramp);
   concurrency += 1;
   (async () => {
-    while (!stopped) await oneRequest();
+    while (!stopped) {
+      await oneRequest();
+      if (DELAY_MS > 0) await new Promise((r) => setTimeout(r, DELAY_MS));
+    }
   })();
 }, stepMs);
 
