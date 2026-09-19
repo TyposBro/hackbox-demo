@@ -1,0 +1,22 @@
+id: hackbox-reflected-xss
+
+info:
+  name: Reflected XSS in search parameter
+  author: hackbox
+  severity: high
+  description: The q parameter is reflected into the HTML response without escaping.
+  tags: xss,owasp
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "<script>alert(1)</script>"
+      - type: status
+        status:
+          - 200
